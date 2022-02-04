@@ -1,8 +1,5 @@
 dir.create("~/Week03Lab03/")
 setwd("~/Week03Lab03/")
-# The solution to last weeks lab solution: 
-# https://drive.google.com/open?id=14fFB1WDGhWdlADl7xLNIbttdZt0-wwTB
-# a handy trick in google docs is the export=download parameter option 
 # https://docs.google.com/a/vt.edu/uc?id=14fFB1WDGhWdlADl7xLNIbttdZt0-wwTB&export=download
 # becomes: 
 url="https://docs.google.com/a/vt.edu/uc?id=14fFB1WDGhWdlADl7xLNIbttdZt0-wwTB&export=download"
