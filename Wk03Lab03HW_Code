@@ -1,0 +1,285 @@
+# Kiara Macdonald 
+# BSE 5304G
+# Lab 03
+# 2.11.2022
+
+# Load Libraries
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(rnoaa,EcoHydRology,lattice,ggplot2)
+
+
+# Select stream flow gage
+# USGS 12141300 MIDDLE FORK SNOQUALMIE RIVER NEAR TANNER, WA
+# Latitude 47°29'10",   Longitude 121°38'48"   NAD27
+# King County, Washington, Hydrologic Unit 17110010
+# Drainage area: 154 square miles
+# Datum of gage: 780 feet above   NGVD29.
+myflowgage_id="12141300" 
+myflowgage=get_usgs_gage(myflowgage_id,
+                         begin_date="2016-01-01",end_date="2022-02-01")
+
+# Find nearby weather gage 
+stns=meteo_distance(
+  station_data=ghcnd_stations(),
+  lat=myflowgage$declat,
+  long=myflowgage$declon,
+  units = "deg",
+  radius = 30,
+  limit = NULL
+)
+# We are looking for stations with elements that have PRCP, TMAX and TMIN 
+# and current data (i.e. Year 2021). 
+WXStn=stns[stns$element=="TMAX"&stns$last_year>=2022,]$id[1]
+WXData=meteo_pull_monitors(
+  monitors=WXStn,
+  keep_flags = FALSE,
+  date_min = "2016-01-01",
+  date_max = NULL,
+  var = c("TMAX","TMIN","PRCP")
+)
+summary(WXData)  #
+# Create an aligned modeldata data frame to build our model in
+modeldata=merge(WXData,myflowgage$flowdata,by.x="date",by.y="mdate")
+summary(modeldata)  #
+# Convert Units and Area normalize flow to match (depth)
+# flow(m^3/day) / (area(km^2) * 1000^2m/km^2) * 1000mm/m = flow(mm/day)
+modeldata$Qmm = modeldata$flow/myflowgage$area/10^3
+# It is good practice to use similar object names to the 
+# values in the documentation of the model (P,Q,MaxTemp,MinTemp)
+modeldata$MaxTemp=modeldata$tmax/10 # Converting to C
+modeldata$MinTemp=modeldata$tmin/10 # Converting to C
+modeldata$P=modeldata$prcp/10 # Converting to mm
+# View(modeldata)  
+# Compare your precipitation to the flow out of your basin
+mean(modeldata$Qmm)
+mean(modeldata$P)
+modeldata$P[is.na(modeldata$P)]=0
+modeldata$MinTemp[is.na(modeldata$MinTemp)]=0
+modeldata$MaxTemp[is.na(modeldata$MaxTemp)]=modeldata$MinTemp[is.na(modeldata$MaxTemp)] +1
+summary(modeldata)
+
+TMWB=modeldata
+
+summary(TMWB)
+
+
+
+
+# Energy Balance Model #######################################################
+# ?SnowMelt
+attach(TMWB)
+SNO_Energy_0=SnowMelt(date, P, MaxTemp-3, MinTemp-3, myflowgage$declat, 
+                      slope = 0,
+                      aspect = 0, tempHt = 1, windHt = 2, groundAlbedo = 0.25,
+                      SurfEmissiv = 0.95, windSp = 2, forest = 0, startingSnowDepth_m = 0,
+                      startingSnowDensity_kg_m3=450)
+SNO_Energy_N10=SnowMelt(date, P, MaxTemp-3, MinTemp-3, myflowgage$declat, 
+                        slope = atan(10/100),
+                        aspect = 0, tempHt = 1, windHt = 2, groundAlbedo = 0.25,
+                        SurfEmissiv = 0.95, windSp = 2, forest = 0, startingSnowDepth_m = 0,
+                        startingSnowDensity_kg_m3=450)
+SNO_Energy_S10=SnowMelt(date, P, MaxTemp-3, MinTemp-3, myflowgage$declat, 
+                        slope = atan(10/100),
+                        aspect = 180*pi[]/180, tempHt = 1, windHt = 2, groundAlbedo = 0.25,
+                        SurfEmissiv = 0.95, windSp = 2, forest = 0, startingSnowDepth_m = 0,
+                        startingSnowDensity_kg_m3=450)
+SNO_Energy_NW45=SnowMelt(date, P, MaxTemp-3, MinTemp-3, myflowgage$declat, 
+                         slope = atan(45/100),
+                         aspect = 45*pi[]/180, tempHt = 1, windHt = 2, groundAlbedo = 0.25,
+                         SurfEmissiv = 0.95, windSp = 2, forest = 0, startingSnowDepth_m = 0,
+                         startingSnowDensity_kg_m3=450)
+SNO_Energy_SW45=SnowMelt(date, P, MaxTemp-3, MinTemp-3, myflowgage$declat, 
+                         slope = atan(45/100),
+                         aspect = 135*pi[]/180, tempHt = 1, windHt = 2, groundAlbedo = 0.25,
+                         SurfEmissiv = 0.95, windSp = 2, forest = 0, startingSnowDepth_m = 0,
+                         startingSnowDensity_kg_m3=450)
+# How do we know what units slope and aspect are in? (view function)
+plot(date,SNO_Energy_0$SnowWaterEq_mm, col = "black", type = "l", xlab="Date",ylab="Snow Water Equivalent (mm)")
+lines(date,SNO_Energy_N10$SnowWaterEq_mm, col = "blue")
+lines(date,SNO_Energy_S10$SnowWaterEq_mm, col = "cyan")
+lines(date,SNO_Energy_NW45$SnowWaterEq_mm, col = "green4")
+lines(date,SNO_Energy_SW45$SnowWaterEq_mm, col = "red")
+legend("topleft",inset = 0.01, legend=c("0%","10% N","10% S", "45% NW","45% SW"),
+       col=c("black","blue","cyan","green4","red"),title = c("Direction"), 
+       lty = 1, lwd = 1, cex = 1)
+title("SWE on Different Slopes")
+detach(TMWB)
+
+
+
+
+# Temperature Index Model ####################################################
+head(TMWB)
+SFTmp = -1  # referred to as SFTMP in SWAT input (Table 1)
+bmlt6 = 1.4   # referred to as SMFMX in SWAT input (Table 1)
+bmlt12 = 1.4  # referred to as SMFMN in SWAT input adjusted for season
+Tmlt = SFTmp  # Assumed to be same as SnowFall Temperature
+Tlag = 0.6  # referred to as TIMP in SWAT input (Table 1)
+TMWB$AvgTemp=(TMWB$MaxTemp+TMWB$MinTemp)/2
+TMWB$bmlt = (bmlt6 + bmlt12)/2 + (bmlt6 - bmlt12)/2 *  sin(2*pi/365*(julian(TMWB$date,origin = as.Date("2000-01-01"))-81))
+# Initialize SNO, Tsno as well as the first values of each
+TMWB$SNO = 0  # Snow Depth (mm)
+TMWB$Tsno = 0  # Snow Temp (C)
+TMWB$SNOmlt = 0  # Snow Melt (mm)
+attach(TMWB)
+for (t in 2:length(date)){
+  Tsno[t]= Tsno[t-1] * (1.0-Tlag) +  AvgTemp[t] * Tlag
+  if(AvgTemp[t] < SFTmp){
+    SNO[t]= SNO[t-1] + P[t]
+  }  else {
+    SNOmlt[t]= bmlt[t] * SNO[t-1] * ((Tsno[t]+MaxTemp[t])/2 - Tmlt) 
+    SNOmlt[t]= min(SNOmlt[t],SNO[t-1])
+    SNO[t]= SNO[t-1] -SNOmlt[t]
+  }
+}
+detach(TMWB)
+TMWB$Tsno=Tsno
+TMWB$SNO=SNO
+TMWB$SNOmlt=SNOmlt
+rm(list=c("SNO", "SNOmlt", "Tsno"))
+
+# Building our Soil Wetting and Drying Functions
+#
+soilwetting<-function(AWprev,dP_func,AWC_func){
+  AW_func<-AWprev+dP_func
+  excess_func<-0.0
+  c(AW_func,excess_func)
+} 
+
+soildrying<-function(AWprev,dP_func,AWC_func){
+  AW_func=AWprev*exp(dP_func/AWC_func)
+  excess_func<-0.0
+  c(AW_func,excess_func)
+}
+# soil_wetting_above_capacity function
+soil_wetting_above_capacity<-function(AWprev,dP_func,AWC_func){
+  AW_func<-AWC_func
+  excess_func<-AWprev+dP_func-AWC_func
+  c(AW_func,excess_func)
+}
+
+########################################
+TMWB$Albedo=.23
+TMWB$Albedo[TMWB$SNO>0]=.95
+#?PET_fromTemp
+attach(TMWB)
+PET=PET_fromTemp(Jday=(1+as.POSIXlt(date)$yday),Tmax_C = MaxTemp,Tmin_C = MinTemp,albedo=Albedo,lat_radians = myflowgage$declat*pi/180) * 1000
+TMWB$PET=PET
+detach(TMWB)
+rm(list=c("PET"))
+
+#TMWB$AWC=??? #Fld Cap = .45, Wilt Pt = .15, z=1000mm
+myflowgage$FldCap=.45
+myflowgage$WiltPt=.15
+myflowgage$Z=1000
+#TMWB$AWC=(myflowgage$FldCap-myflowgage$WiltPt)*myflowgage$Z # 
+TMWB$AWC= 150
+TMWB$dP = 0 # Initializing Net Precipitation
+TMWB$ET = 0 # Initializing ET
+TMWB$AW = 0 # Initializing AW
+TMWB$Excess = 0 # Initializing Excess
+
+# Loop to calculate AW and Excess
+attach(TMWB)
+for (t in 2:length(AW)){
+  # This is where Net Precipitation is now calculated
+  # Do you remember what Net Precip is? Refer to week 2 notes
+  ET[t] = min (AW[t-1],PET[t])
+  ET[t] = (AW[t-1]/AWC[t-1])*PET[t] # New Model
+  if(AvgTemp[t] >= SFTmp){
+    dP[t] = P[t] - ET[t] + SNOmlt[t] 
+  }  else {
+    dP[t] = ET[t]
+  }
+  # From here onward, everything is the same as Week2’s lab
+  if (dP[t]<=0) {
+    values<-soildrying(AW[t-1],dP[t],AWC[t])
+  } else if((dP[t]>0) & (AW[t-1]+dP[t])<=AWC[t]) {
+    values<-soilwetting(AW[t-1],dP[t],AWC[t])
+  } else {
+    values<-soil_wetting_above_capacity(AW[t-1],dP[t],AWC[t])
+  }
+  AW[t]<-values[1]
+  Excess[t]<-values[2]
+}
+TMWB$AW=AW
+TMWB$Excess=Excess
+TMWB$dP=dP
+rm(list=c("AW","dP","ET", "Excess"))
+detach(TMWB) # IMPORTANT TO DETACH
+
+
+TMWB$Qpred=NA
+TMWB$Qpred[1]=0
+TMWB$S=NA
+TMWB$S[1]=0
+attach(TMWB)
+fcres=0.16
+for (t in 2:length(date)){
+  S[t]=S[t-1]+Excess[t]     
+  Qpred[t]=fcres*S[t]
+  S[t]=S[t]-Qpred[t]
+}
+TMWB$S=S
+TMWB$Qpred=Qpred # UPDATE vector BEFORE DETACHING
+
+#Make a plot that has Qmm, P,and Qpred over time
+#plot(date,P,col="black")
+plot(date,Qmm,type = "l",col="black", xlab = "Date", ylab = "Q (mm)")
+lines(date,Qpred,col="blue")
+legend("topleft",inset = 0.01, legend=c("Measured","Modeled"),
+       col=c("black","blue"),title = c("Discharge"), 
+       lty = 1, lwd = 1, cex = 1)
+title("Measured vs. Modeled Discharge ")
+detach(TMWB) # IMPORTANT TO DETACH
+rm(list=c("Qpred","S"))
+
+
+# Efficiency for Calibration ########################################
+attach(TMWB)
+NSE=function(Yobs,Ysim){
+  return(1-sum((Yobs-Ysim)^2, na.rm=TRUE)/
+           sum((Yobs-mean(Yobs, na.rm=TRUE))^2, na.rm=TRUE))
+}
+Efficiency = NSE(TMWB$Qmm,TMWB$Qpred)
+print(Efficiency)
+detach(TMWB)
+
+
+
+# (GRAD Question) Flying vs No Flying #####################################
+
+# Energy Model
+attach(TMWB)
+SNO_Energy_Fly=SnowMelt(date, P, MaxTemp-3, MinTemp-3, myflowgage$declat, 
+                      slope = 0,
+                      aspect = 0, tempHt = 1, windHt = 2, groundAlbedo = 0.25,
+                      SurfEmissiv = 0.95, windSp = 2, forest = 0, startingSnowDepth_m = 0,
+                      startingSnowDensity_kg_m3=450)
+SNO_Energy_NoFly=SnowMelt(date, P, MaxTemp-3.1, MinTemp-2.9, myflowgage$declat, 
+                          slope = 0,
+                          aspect = 0, tempHt = 1, windHt = 2, groundAlbedo = 0.25,
+                          SurfEmissiv = 0.95, windSp = 2, forest = 0, startingSnowDepth_m = 0,
+                          startingSnowDensity_kg_m3=450)
+plot(date,SNO_Energy_Fly$SnowWaterEq_mm)
+points(date,SNO_Energy_NoFly$SnowWaterEq_mm, col="red")
+detach(TMWB)
+
+# PET Model
+TMWB$Albedo=.23
+TMWB$Albedo[TMWB$SNO>0]=.95
+#?PET_fromTemp
+attach(TMWB)
+PET_Fly=PET_fromTemp(Jday=(1+as.POSIXlt(date)$yday),
+                 Tmax_C = MaxTemp,Tmin_C = MinTemp,albedo=Albedo,
+                 lat_radians = myflowgage$declat*pi/180) * 1000
+TMWB$PET_Fly=PET_Fly
+
+PET_NoFly=PET_fromTemp(Jday=(1+as.POSIXlt(date)$yday),
+                 Tmax_C = MaxTemp-0.9,Tmin_C = MinTemp+0.9,albedo=Albedo,
+                 lat_radians = myflowgage$declat*pi/180) * 1000
+TMWB$PET_NoFly=PET_NoFly
+plot(date,PET_Fly, col="black")
+points(date,PET_NoFly, col="red")
+detach(TMWB)
+rm(list=c("PET_Fly","PET_NoFly"))
