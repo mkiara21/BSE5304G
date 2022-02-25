@@ -57,7 +57,7 @@ CNmodel=function(CNmodeldf, CNavg = 75,IaFrac = 0.001,fnc_slope=0,
       AW[t]=AWC[t]
       # Otherwise, if dP is less than the initial abstraction? 
       # https://en.wikipedia.org/wiki/Runoff_curve_number#Definition
-    } else if (dP[t]<=Ia[t]) {
+    } else if (dP[t]=Ia[t]) {
       Excess[t]=0.0
       AW[t]=AW[t-1] + dP[t]
     } else {
