@@ -1,4 +1,4 @@
-CNmodel<-function(CNmodeldf, CNavg = 75,IaFrac = 0.001,fnc_slope=0, 
+CNmodel=function(CNmodeldf, CNavg = 75,IaFrac = 0.001,fnc_slope=0, 
                   fnc_aspect=0,func_DAWC=.3,func_z=1000,fnc_fcres=.3) {
   
   # Energy Balance based Snow Accumulation 
